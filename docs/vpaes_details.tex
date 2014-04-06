@@ -1,0 +1,293 @@
+%% Based on a TeXnicCenter-Template by Gyorgy SZEIDL.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%------------------------------------------------------------
+%
+\documentclass[a4paper]{article}
+%
+\usepackage{etex,etoolbox}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amsfonts}%
+\usepackage{amssymb}%
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{url}
+%\usepackage[numbers]{natbib}
+\usepackage{verbatimbox}
+
+\usepackage[margin=1in]{geometry}
+
+\numberwithin{equation}{section}
+%--------------------------------------------------------
+\begin{document}
+\title{Constant-Time AES}
+\author{David Rufino}
+\newcommand{\nn}{\nonumber}
+\newcommand{\mbbF}{\mathbb{F}}
+\setlength{\parindent}{0pt}
+\maketitle
+
+\section{Introduction}
+
+It's known that a naive software implementation of the AES symmetric cipher \cite{NISTAES} is vulnerable to timing attacks \cite{bernstein2005cache}. \cite{Hamburg2009AES} presents a constant-time implementation using SSSE3 instructions. This note simply expands on the details required to implement such a routine. 
+
+\section{Background}
+
+Recall that the AES symmetric encryption algorithm works on a  16-byte (128-bit) block, with either a 128,192 or 256-bit key size. The bytes are considered to be elements of the finite field $\mathbb{F}_{2^8}$ of order 256, with respect to the polynomial basis associated to the canonical representation
+
+\begin{eqnarray}
+\label{aespoly}
+	 \mbbF_{2^8} &\simeq& \mbbF_2\left[ X \right] / \left( m(X) \right) \, , \nn \\
+          m(X) &=& X^8 + X^4 + X^3 + X + 1 \, . 
+\end{eqnarray}
+
+For example
+
+	$$ 01101010 b =  0\text{x}6A = X^6 + X^5 + X^3 + X $$
+
+Addition is defined in the obvious way, and multiplication is defined modulo the polynomial $m(X)$. In this paper we make a distinction between the $\mbbF_2$-vector space $\mbbF_{2}^8$ and the field $\mbbF_{2^8}$. In plain terms the former does not have a preferred definition of multiplication a-priori. It's only after choosing a basis for the field $\mbbF_{2^8}$ that we can identify the two.
+
+The ``state'' of the AES algorithm is conceptually a $4 \times 4$ matrix with elements in $\mbbF_{2^8}$. The convention is that the elements are with respect to the canonical basis, and that it is stored as a $16$-byte array in which the columns are contiguous. Each round of the encryption algorithm consists of the following transformations on the state
+
+\begin{itemize}
+\item {\bf{SubBytes}}
+
+To each element of the state apply the transformation (in the canonical basis)
+   
+   $$ z \rightarrow A z^{-1} + b $$
+   
+ where the elements $A,b$ are defined in the original spec \cite{NISTAES} and inversion is understood to take place in the finite field discussed above.
+ 
+\item {\bf{ShiftRows}}
+
+Rotate the rows of the state matrix
+
+\item {\bf{MixColumns}}
+
+Pre-multiply the state matrix by the following
+
+\[
+\left( \begin{array}{cccc}
+2 & 3 & 1 & 1 \\
+1 & 2 & 3 & 1 \\
+1 & 1 & 2 & 3 \\
+3  & 1 & 1 & 2 
+\end{array} \right)
+\]
+
+where we identify a number with its binary expansion in the polynomial basis. For example 
+
+\begin{eqnarray*}
+  5 &=& 1 + X^2 \\
+  10 &=& X + X^3
+\end{eqnarray*}
+	
+NB. this step is omitted on the final round.
+
+\item {\bf{AddRoundKey}}
+
+The key expansion (see \cite{NISTAES} for details) for this round is added (i.e. XOR-ed) with the state.
+
+\end{itemize}
+
+The first is non-linear and so typically implemented with lookup tables. It's discussed below that in order to avoid lookup tables it's easier to work in a different basis. For efficiency reasons then, we work consistently in the tower basis (defined below). This requires a number of changes
+
+\begin{itemize}
+\item The key expansion must be converted to the tower basis
+\item The input cipher text or plaintext must be converted at the start of the algorithm
+\item The output cipher text or plaintext must be converted to the polynomial basis at the end of the algorithm
+\item The lookup tables (for example, scalar multiplication) must be with respect to tower basis
+\end{itemize}
+
+\section{PSHUFB Instruction}
+
+The PSHUFB (shuffle) instruction operations on two 128-bit (16-byte) registers as follows
+
+\begin{verbatim}
+unsigned char a[16],b[16],r[16];
+for (i = 0; i < 16; ++i)
+  r[i] = (b[i] & 0x80) ? 0 : a[b[i] & 0x0f];
+\end{verbatim}
+
+As the choice of the register $a$ is arbitrary, due to the presence of the mask on $b$ this may be viewed as an arbitrary function
+
+	$$ \mbbF_2^4 \rightarrow \mbbF_2^8 $$
+
+or alternatively as an appropriately restricted function
+
+	$$ \mbbF_2^4 \oplus \mbbF_2^4 \rightarrow \mbbF_2^8 $$
+	
+where points with the most significant bit set are mapped to zero. Implementing a function
+
+  $$\mbbF^8_{2} \rightarrow \mbbF^8_{2}$$
+  
+is in general difficult, but if it is linear (e.g. basis change) then two shuffle operations will suffice, as with the following pseudo-code
+
+\begin{verbatim}
+	out1 = pshufb(lookup_lo, and(in,0x0f0f0f0f0f0f0f0f));
+	out2 = pshufb(lookup_hi, and(in,0xf0f0f0f0f0f0f0f0)>>4);
+	out = xor(out1,out2)
+\end{verbatim}
+
+\section{Inversion with Permutations}
+
+Inversion in $\mbbF_{2^8}$ is not linear (in any basis), but \cite{Hamburg2009AES} shows it is possible to reduce this operation to a linear combination of such functions with domain $\mbbF_2^4$ by considering an alternative (``tower'') representation of $\mbbF_{2^8}$
+
+\begin{eqnarray*}
+	\mbbF_{2^4} &\simeq& \mbbF_2[\zeta] / (\zeta^4 + \zeta^3 + \zeta^2 + \zeta + 1) \\
+	\mbbF_{2^8} &\simeq& \mbbF_{2^4}[t] / (t^2 + t + \zeta) \, . 
+\end{eqnarray*}
+
+Note in this representation every element $z \in \mbbF_{2^8}$ may be represented uniquely as
+
+\begin{eqnarray*}
+   z &=&  x t + y \bar{t} \quad x,y \in \mbbF_4
+\end{eqnarray*}
+
+where $\bar{t} = t + 1$ is the conjugate of $t$. The addition law is clear and multiplication is given by
+
+\begin{eqnarray*}
+ (x_1 t + y_1 \bar{t}) \cdot (x_2 t + y_2 \bar{t} ) &=& x_1 x_2 t + y_1 y_2 \bar{t} + \left( x_1 + y_1 \right) \left( x_2 + y_2 \right) \zeta
+\end{eqnarray*}
+
+The inverse of a general element is given by
+
+\begin{eqnarray*}
+\left( xt + y \bar{t} \right)^{-1} = \frac{yt + x \bar{t}}{xy + \left(x^2 + y^2\right)\zeta}
+\end{eqnarray*}
+
+Alternatively it is shown in \cite{Hamburg2009AES} that inversion in $\mbbF_{2^8}$ may be expressed in terms of inversions over $\mbbF_{2^4}$  with the following formula
+
+\begin{eqnarray}
+\label{nestedinversion}
+\frac{1}{xt + y \bar{t}} &=& \frac{t + \zeta}{\frac{1}{1 / y  + 1/\zeta(x+y)} + x}+\frac{\bar{t} + \zeta}{\frac{1}{1 / x  + 1/\zeta(x+y)} + y}
+\end{eqnarray}
+
+provided one is careful about dividing by zero. The advantage of this formula is it does not require any explicit multiplications, which are more difficult to implement using shuffle instructions.
+
+To implement the inversion formula \eqref{nestedinversion} consider the four maps
+
+	$$ \psi_i : \mbbF_{2^4}  \rightarrow \mbbF_{2^8} $$
+
+corresponding to the inversions 
+
+\begin{eqnarray*}
+ & z &\rightarrow z^{-1} \\
+ & z &\rightarrow \left( \zeta z \right)^{-1} \\
+ & z &\rightarrow \frac{t + \zeta}{z} \\
+ & z &\rightarrow \frac{\bar{t} + \zeta}{z}
+\end{eqnarray*}
+
+In practice these are implemented with respect to the basis $\{ 1, \zeta, \zeta^2, \zeta^3 \}$ for $\mbbF_{2^4}$ and the one already noted for $\mbbF_{2^8}$. Further we ensure that $\psi_i(0) = 128$ so that $\psi_j(\psi_i(0)) = 0 $ and\eqref{nestedinversion} is correct in all cases. It's clear that together with addition (XOR) this is enough to implement equation \eqref{nestedinversion}.
+
+\section{Basis Change}
+
+This section discusses the conversion between canonical basis and the tower basis. The simplest way is to find a root of the AES polynomial \eqref{aespoly} in the tower basis. Using this allows one to easily construct an isomorphism between the two representation. For concreteness consider the unique isomorphism generated by
+
+	$$ X \rightarrow \left( \zeta + \zeta^3 \right) t \,. $$
+
+In practice we are interested in the basis change from the polynomial basis to the tower basis
+
+\begin{eqnarray}
+\{ t, \zeta t, \zeta^2 t , \zeta^3 t ,  \bar{t}, \zeta \bar{t}, \zeta^2 \bar{t} , \zeta^3 \bar{t} \} \, .
+\end{eqnarray}
+
+Call this $\hat{\phi} : \mathbb{F}^8_2 \rightarrow \mathbb{F}^8_2$. Actually this function is a linear isomorphism, and so may be decomposed as follows
+
+\begin{eqnarray*}
+	 \hat{\phi}(x) &=& \hat{\phi}_{\text{lo}} (x_{\text{lo}}) \oplus \hat{\phi}_{\text{hi}} (x_{\text{hi}}) \\
+	\hat{\phi}_{\text{lo}}, \hat{\phi}_{\text{hi}} &:& \mathbb{F}^4_2 \rightarrow \mathbb{F}^8_2 \, .
+\end{eqnarray*}
+
+The two functions are then in a form which may be implemented with the nstruction PSHUFB. For future reference we note the inverse of the basis change given above is generated by
+
+\begin{eqnarray*}
+t &\rightarrow& X + X^5 + X^7 \\
+\bar{t} &\rightarrow& 1 + X + X^5 + X^7 \\
+\zeta &\rightarrow& X^4 + X^6 \, . 
+\end{eqnarray*}
+
+It may be preferable to consistently work in the ``tower'' basis to avoid converting representations on each round. In this case the state must be converted to and from the tower basis at the start and the end of the algorithm, and they key expansion must also be converted.
+
+\section{Affine component of SubBytes}
+
+As the affine map is linear, it may be implemented with two shuffle instructions followed by an XOR. If it is adjacent to another linear map in the algorithm then clearly the two maps may be merged for efficiency reasons. For example in the inversion algorithm described above, the final two operations are shuffles, and the linear portion of the affine map may be incorporated directly. Note that must be careful when working in the tower basis.
+
+\section{Shift Rows}
+
+The ShiftRows transformation and its inverse can naturally be implemented with a single shuffle instruction.
+
+\section{Mix Columns}
+
+Recall that the mix columns operation corresponds to multiplication by a circulant matrix over $\mbbF_{2^8}$ 
+
+\[ M :=
+\left( \begin{array}{cccc}
+2 & 3 & 1 & 1 \\
+1 & 2 & 3 & 1 \\
+1 & 1 & 2 & 3 \\
+3 & 1 & 1 & 2
+\end{array} \right)
+\]
+
+It may be shown that the inverse operation is multiplication by the circulant matrix
+
+\[ M^{-1} := 
+\left( \begin{array}{cccc}
+14 & 11 & 13 & 9 \\
+9 & 14 & 11 & 13 \\
+13 & 9 & 14 & 11 \\
+11 & 13 & 9 & 14
+\end{array} \right)
+\]
+
+Let $P$ denote the elementary circulant matrix 
+
+\[
+\left( \begin{array}{cccc}
+0 & 1 & 0 & 0 \\
+0 & 0 & 1 & 0 \\
+0 & 0 & 0 & 1 \\
+1 & 0 & 0 & 0 
+\end{array} \right)
+\]
+
+This, and its powers, are easy to implement using the shuffle instruction. Recalling that $n \times n$ matrices form a $\mbbF_{2^8}$-algebra (with elements acting point wise), then we see
+
+\begin{eqnarray*}
+ M &=& 2 I + 3 P + P^2 + P^3 \\
+     &=& \left(I + P\right)\left(2I + P\right) + P^3
+\end{eqnarray*}
+
+and
+
+\begin{eqnarray*}
+ M^{-1} &=& \left(8+4+2\right)I + \left(8+2+1\right)P + \left(8+4+1\right)P^2 + \left(8+1\right)P^3 \\
+    &=& \left(I + P^2\right)\left[ 9 \cdot \left(I + P\right) +4 \cdot I \right] + 2 \cdot \left(I + P\right) + I
+\end{eqnarray*}
+
+Calculation of $M$ requires one doubling, three shuffles and three additions.
+
+Calculation of $M^{-1}$ requires three scalar multiplications, two shuffles and five additions.
+
+Note in the canonical basis the scalar multiplications can be calculated as follows
+
+	$$ X^k \sum_{i=0}^7 a_i X^i = \sum_{i=0}^3 a_i X^{i+k} + X^k \left( \sum_{i=4}^7 a_i X^i \right) \quad k \leq 4 $$
+	
+The first term is a left shift and the final term may be calculated by a lookup table as with the following pseudocode.
+
+\begin{verbatim}
+         mult1 = and(x,0x0f)<<k
+         mult2 = pshufb(lookup_k,and(x,0xf0)>>4)
+         mult  = xor(mult1,mult2)
+\end{verbatim}
+
+Working in the tower basis requires two shuffle instructions.
+
+\bibliographystyle{alpha}
+\bibliography{bibentry}
+
+
+\end{document}
+
