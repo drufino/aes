@@ -22,13 +22,16 @@ to achieve this
     
       Make use of SSSE3 ASM extensions. This is the subject of Hamburg, Mike "Accelerating AES with vector permute instructions"
 
-        * http://shiftleft.org/papers/vector_aes/vector_aes.pdf
+        http://shiftleft.org/papers/vector_aes/vector_aes.pdf
         
       and we provide a simplified reusable implementation here.
 
 The package is organised as follows
 
  /include  Public interface
+
  /src      A simple resuable implementation based on intrinsics
+
  /docs     Some mathematical details required to implement the methodology
+
  /tables   OCaml code to perform the finite field arithmetic necessary to calculate the magic constants.
