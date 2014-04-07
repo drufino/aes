@@ -20,11 +20,8 @@ to achieve this
 
    -  Vector Permute instructions
     
-      Make use of SSSE3 ASM extensions. This is the subject of
-
-      * Hamburg, Mike "Accelerating AES with vector permute instructions"
-      * http://shiftleft.org/papers/vector_aes/vector_aes.pdf
-
+      Make use of SSSE3 ASM extensions. This is the subject of Hamburg, Mike "Accelerating AES with vector permute instructions"
+        * http://shiftleft.org/papers/vector_aes/vector_aes.pdf
       and we provide a simplified reusable implementation here.
 
 The package is organised as follows
