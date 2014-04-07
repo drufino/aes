@@ -8,15 +8,10 @@ to achieve this
 
    -  Bitslice
       
-      Unfortunately this is not easily applicable to the most commonly used
-      mode of operation, namely CBC (cipher-block-chaining) mode as this is
-      inherently sequential, and bitslicing relies on parallelizing the block
-      cipher.
-
    -  AES-NI instructions
 
       These are dedicated CPU instructions for the core AES algorithm. This is
-      by far the preferred method, but is by no means universally available. 
+      the preferred method, but is by no means universally available. 
 
    -  Vector Permute instructions
     

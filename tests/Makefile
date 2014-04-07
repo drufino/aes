@@ -17,7 +17,7 @@ aes_test: _build/aes_test.o ../_build/libtinfoil.a
 	$(CXX) `pwd`/$< -o $@ -lstdc++ -ltinfoil -L../_build
 
 KAT_AES.zip:
-	wget -nd -c http://csrc.nist.gov/groups/STM/cavp/documents/aes/KAT_AES.zip
+	curl http://csrc.nist.gov/groups/STM/cavp/documents/aes/KAT_AES.zip > KAT_AES.zip
 
 KAT_AES: KAT_AES.zip
 	mkdir -p KAT_AES
